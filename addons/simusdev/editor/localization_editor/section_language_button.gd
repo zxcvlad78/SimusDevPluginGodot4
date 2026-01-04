@@ -1,3 +1,4 @@
+@tool
 class_name SD_EditorUILanguageSectionButton extends Button
 
 @export var section:String
