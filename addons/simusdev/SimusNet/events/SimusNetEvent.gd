@@ -44,8 +44,11 @@ func publish(arguments: Variant = null) -> bool:
 	published_post.emit()
 	return true
 
-func listen(callable: Callable) -> void:
-	published.connect(callable)
+func listen(callable: Callable, include_in_args: bool = false) -> void:
+	if include_in_args:
+		published.connect(callable.bind(self))
+	else:
+		published.connect(callable)
 
 func unlisten(callable: Callable) -> void:
 	published.disconnect(callable)

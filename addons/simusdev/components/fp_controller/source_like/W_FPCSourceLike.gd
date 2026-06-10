@@ -24,7 +24,7 @@ func _exit_tree() -> void:
 
 func is_authority() -> bool:
 	if multiplayer_authorative:
-		return is_multiplayer_authority()
+		return SimusNet.is_network_authority(self)
 	return true
 
 func _ready() -> void:

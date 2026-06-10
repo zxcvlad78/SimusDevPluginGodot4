@@ -6,6 +6,13 @@ var __last_cooldown: float = 0.0
 
 var __timer: SceneTreeTimer
 
+func set_time(time: float) -> SD_CooldownTimer:
+	__last_cooldown = time
+	return self
+
+func get_time() -> float:
+	return __last_cooldown
+
 func is_active() -> bool:
 	return __is_active
 

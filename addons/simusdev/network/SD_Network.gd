@@ -1,5 +1,5 @@
 @static_unload
-extends SD_Object
+extends Resource
 class_name SD_Network
 
 static var singleton: SD_NetworkSingleton

@@ -9,7 +9,7 @@ channel: Variant = 0) -> void:
 	var config: Dictionary = {
 		"rpc_mode" : rpc_mode,
 		"transfer_mode" : transfer_mode,
-		"call_local" : false,
+		"call_local" : true,
 		"channel" : SimusNetChannels.parse_and_get_id(channel)
 	}
 	
@@ -41,16 +41,15 @@ static func invoke(callable: Callable, ...args: Array) -> void:
 
 static func _invoke(callable: Callable, args: Array) -> void:
 	for peer in SimusNetConnection.get_connected_peers():
-		if SimusNetVisibility.is_visible_for(peer, callable.get_object()):
-			_invoke_on(peer, callable, args)
+		if SimusNetVisibility.is_visible_for(peer, callable.get_object()) or SimusNetVisibility.is_method_always_visible(callable):
+				_invoke_on(peer, callable, args)
 
 static func invoke_all(callable: Callable, ...args: Array) -> void:
-	callable.callv(args)
+	_invoke_on(SimusNetConnection.get_unique_id(), callable, args)
 	_invoke(callable, args)
 
 static func _invoke_on(peer: int, callable: Callable, args: Array) -> void:
-	if peer == SimusNetConnection.get_unique_id() or peer == 0:
-		callable.callv(args)
+	if is_cooldown_active(callable):
 		return
 	
 	var arr: Array = []
@@ -58,9 +57,20 @@ static func _invoke_on(peer: int, callable: Callable, args: Array) -> void:
 	arr.append(callable.get_method())
 	arr.append_array(args)
 	callable.get_object().callv("rpc_id", arr)
+	SimusNetRPC._start_cooldown(callable)
 
 static func invoke_on(peer: int, callable: Callable, ...args: Array) -> void:
 	_invoke_on(peer, callable, args)
 
 static func invoke_on_server(callable: Callable, ...args: Array) -> void:
 	_invoke_on(SimusNetConnection.SERVER_ID, callable, args)
+
+static func set_cooldown(callable: Callable, time: float = 0.0) -> SimusNetRPCGodot:
+	SimusNetRPC.set_cooldown(callable, time)
+	return singleton.RPCgodot
+
+static func get_cooldown(callable: Callable) -> SimusNetCooldownTimer:
+	return SimusNetRPC.get_cooldown(callable)
+
+static func is_cooldown_active(callable: Callable) -> bool:
+	return SimusNetRPC.is_cooldown_active(callable)

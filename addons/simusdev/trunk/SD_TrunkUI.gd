@@ -6,7 +6,7 @@ signal interface_closed(node: Node)
 
 signal interface_opened_or_closed(node: Node, status: bool)
 
-var _active_interfaces: Array[Node]
+var _active_interfaces: Array[Node] : get = get_active_interfaces
 
 const ACTION_CLOSE_MENU: String = "sd_ui_close_menu"
 
@@ -49,7 +49,11 @@ func close_last_interface() -> void:
 
 func get_last_interface() -> Node:
 	if has_active_interface():
-		var last: Node = _active_interfaces[_active_interfaces.size() - 1]
+		var id: int = _active_interfaces.size() - 1
+		if id < 0:
+			return null
+		
+		var last: Node = _active_interfaces[id]
 		return last
 	return null
 
@@ -60,6 +64,11 @@ func is_interface_active(node: Node) -> bool:
 	return _active_interfaces.has(node)
 
 func get_active_interfaces() -> Array[Node]:
+	var id: int = 0
+	for i in _active_interfaces:
+		if !is_instance_valid(i):
+			_active_interfaces.remove_at(id)
+	
 	return _active_interfaces
 
 func _update_UI() -> void:

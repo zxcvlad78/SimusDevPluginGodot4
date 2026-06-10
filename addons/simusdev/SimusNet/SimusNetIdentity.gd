@@ -1,14 +1,21 @@
 extends Resource
 class_name SimusNetIdentity
 
-var owner: Object
+var owner: Object : get = get_owner
+
+func get_owner() -> Object:
+	if !_owner_weak_ref or !is_instance_valid(_owner_weak_ref.get_ref()):
+		return null
+	
+	return _owner_weak_ref.get_ref()
+
+var _owner_weak_ref: WeakRef
+
 var settings: SimusNetIdentitySettings
 
 signal on_ready()
 
 var is_ready: bool = false
-
-var _bytes_unique_id: PackedByteArray = PackedByteArray()
 
 var is_initialized: bool = false
 
@@ -17,159 +24,160 @@ var _unique_id: int = -1
 
 var _net_settings: SimusNetSettings
 
-signal _on_awaited_and_cached()
-
-static var _list_by_id: Dictionary[int, SimusNetIdentity] = {}
-static var _list_by_generated_id: Dictionary[Variant, SimusNetIdentity] = {}
-
 const BYTE_SIZE: int = 2
 
-var _invisible_for_peers: PackedInt32Array = []
-
-func is_visible_for_peer(id: int) -> bool:
-	return !_invisible_for_peers.has(id)
-
-func is_invisible_for_peer(id: int) -> bool:
-	return _invisible_for_peers.has(id)
-
-static func register(object: Object, settings: SimusNetIdentitySettings = null, from: SimusNetIdentity = null) -> SimusNetIdentity:
+static func __register__(object: Object, network_id: int, generated_id: Variant) -> SimusNetIdentity:
 	if object.has_meta("SimusNetIdentity"):
-		return object.get_meta("SimusNetIdentity")
+		var variant: Variant = object.get_meta("SimusNetIdentity")
+		if is_instance_valid(variant):
+			if variant is SimusNetIdentity:
+				if variant.owner == object:
+					return variant
 	
-	var identity: SimusNetIdentity = from
-	if !identity:
-		identity = SimusNetIdentity.new()
+	var identity: SimusNetIdentity = SimusNetIdentity.new()
+	identity.settings = SimusNetIdentitySettings.new()
+	identity._generated_unique_id = generated_id
+	identity._unique_id = network_id
 	
 	object.set_meta("SimusNetIdentity", identity)
 	
-	identity.owner = object
-	identity.settings = settings
-	
-	if !is_instance_valid(settings):
-		identity.settings = SimusNetIdentitySettings.new()
+	identity._owner_weak_ref = weakref(object)
 	
 	identity._initialize()
 	return identity
 
+static func register(object: Object, network_id: int = -1) -> SimusNetIdentity:
+	return __register__(object, network_id, null)
+
+static func register_with_generated_id(object: Object, id: Variant = null) -> SimusNetIdentity:
+	return __register__(object, -1, id)
+
 func _initialize() -> void:
-	_net_settings = SimusNetSettings.get_or_create()
+	if !is_instance_valid(settings):
+		settings = SimusNetIdentitySettings.new()
+	
 	SimusNetEvents.event_disconnected.listen(_deinitialize_dynamic)
 	
+	_net_settings = SimusNetSettings.get_or_create()
+	
 	if owner is Node:
-		if !owner.is_inside_tree():
-			await owner.tree_entered
+		if !owner.is_node_ready():
+			await owner.ready
 		
+		owner.renamed.connect(_renamed)
 		owner.tree_entered.connect(_tree_entered)
-		owner.tree_exited.connect(_tree_exited)
+		owner.tree_exiting.connect(_tree_exited)
 	
 	_initialize_dynamic()
 	
+
+static func generate_instance_unique_id_int() -> int:
+	return SimusNetIdentitySettings._generate_instance_int()
+
+func _renamed() -> void:
+	get_dictionary_by_generated_id().erase(get_generated_unique_id())
+	_try_generate_generated_id()
+	get_dictionary_by_generated_id().set(get_generated_unique_id(), self)
 
 func _initialize_dynamic() -> void:
 	if !SimusNetConnection.is_active():
 		await SimusNetEvents.event_connected.published
 	
-	if is_initialized:
+	if SimusNetConnection.is_server():
+		if _unique_id == -1:
+			_unique_id = SimusNetIdentitySettings._generate_instance_int()
+	
+	if is_initialized and _unique_id > -1:
 		return
 	
 	is_initialized = true
 	
 	if SimusNetConnection.is_server():
-		_unique_id = SimusNetIdentitySettings._generate_instance_int()
 		_tree_entered()
 	else:
 		_tree_entered()
 		
-		_unique_id = get_cached_unique_ids_values().get(_generated_unique_id, -1)
-		if _unique_id < 0:
-			if _net_settings.debug_enable:
-				print_debug("(%s) unique id not found, awaiting for cache..." % str(_generated_unique_id))
-				_await_for_cache()
-				await _on_awaited_and_cached
-				print_debug("(%s) cached!" % str(_generated_unique_id))
-		
-		get_cached_unique_ids_values().erase(_generated_unique_id)
-		get_cached_unique_ids().erase(_unique_id)
+		if _unique_id == -1:
+			SimusNetCache.request_unique_id(get_generated_unique_id())
+			SimusNetCache.instance.on_unique_id_received.connect(_on_unique_id_received.bind(get_generated_unique_id()))
+			return
 		
 		_set_ready()
+
+func _on_unique_id_received(generated_id: Variant, unique_id: Variant, requested_id: Variant) -> void:
+	if generated_id == requested_id:
+		_unique_id = unique_id
+		_set_ready()
+		SimusNetCache.instance.on_unique_id_received.disconnect(_on_unique_id_received)
 
 func _deinitialize_dynamic() -> void:
 	if !is_initialized:
 		return
 	
-	SimusNetIdentitySettings._delete_instance_int()
-	
+	_unique_id = -1
 	is_initialized = false
-	
+	is_ready = false
 	_initialize_dynamic()
-	
-
-func _await_for_cache() -> void:
-	SimusNetEvents.event_identity_cached.listen(_listen_cache)
-
-func _listen_cache() -> void:
-	var event: SimusNetEventIdentityCached = SimusNetEvents.event_identity_cached
-	if event.generated_unique_id == _generated_unique_id:
-		_on_awaited_and_cached.emit()
-		event.unlisten(_listen_cache)
 
 func _tree_entered() -> void:
-	if settings.get_unique_id() == null:
-		if owner is Node:
-			_generated_unique_id = owner.get_path()
-	else:
-		_generated_unique_id = settings.get_unique_id()
-	
-	_list_by_generated_id[_generated_unique_id] = self
-	
-	SimusNetCache._cache_identity(self)
+	_try_generate_generated_id()
+	get_dictionary_by_generated_id().set(get_generated_unique_id(), self)
 	
 	if SimusNetConnection.is_server():
 		_set_ready()
+	
+
+func _try_generate_generated_id() -> void:
+	if settings.get_unique_id() == null:
+		if owner is Node:
+			if !owner.is_node_ready():
+				await owner.ready
+			
+			if !owner.get_path().is_empty():
+				_generated_unique_id = owner.get_path()
+	else:
+		_generated_unique_id = settings.get_unique_id()
+	
 	
 
 func _set_ready() -> void:
 	if is_ready:
 		return
 	
-	_bytes_unique_id.clear()
-	_bytes_unique_id.resize(BYTE_SIZE)
+	_try_generate_generated_id()
 	
-	_bytes_unique_id.encode_u16(0, get_unique_id())
+	get_dictionary_by_unique_id()[get_unique_id()] = self
+	get_dictionary_by_generated_id()[get_generated_unique_id()] = self
 	
-	_list_by_id[get_unique_id()] = self
-	
+	#if SimusNetConnection.is_server():
+		#print("caching: ", get_generated_unique_id())
+		#print(get_dictionary_by_generated_id().has(get_generated_unique_id()))
+	#
 	is_ready = true
 	on_ready.emit()
 	
-	SimusNetVisibility._local_identity_create(self)
+	if owner:
+		SimusNetVisibility._local_identity_create(self)
 
 func _tree_exited() -> void:
-	_list_by_generated_id.erase(get_generated_unique_id())
+	is_initialized = false
 	
-	if !is_ready:
-		await is_ready
+	get_dictionary_by_generated_id().erase(get_generated_unique_id())
+	#if SimusNetConnection.is_server():
+		#print("removing: ", get_generated_unique_id())
 	
-	if owner.has_method("is_queued_for_deletion"):
-		if owner.is_queued_for_deletion():
-			_destroy()
-
-
-func _destroy() -> void:
-	_deinitialize_dynamic()
 	SimusNetVisibility._local_identity_delete(self)
-	SimusNetCache._uncache_identity(self)
 	
-	_list_by_id.erase(get_unique_id())
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE:
+		SimusNetVisibility._local_identity_delete(self)
 
 func get_generated_unique_id() -> Variant:
 	return _generated_unique_id
 
 func get_unique_id() -> int:
 	return _unique_id
-
-func serialize_unique_id() -> PackedByteArray:
-	return _bytes_unique_id
 
 func try_serialize_into_variant() -> Variant:
 	if get_unique_id() >= 0:
@@ -178,22 +186,39 @@ func try_serialize_into_variant() -> Variant:
 
 static func try_deserialize_from_variant(variant: Variant) -> SimusNetIdentity:
 	if variant is int:
-		return _list_by_id.get(variant)
-	return _list_by_generated_id.get(variant)
+		return get_dictionary_by_unique_id().get(variant)
+	return get_dictionary_by_generated_id().get(variant)
+
+static func get_dictionary_by_generated_id() -> Dictionary[Variant, SimusNetIdentity]:
+	return SimusNetCache.instance._identities_by_generated_id
+
+static func get_dictionary_by_unique_id() -> Dictionary[int, SimusNetIdentity]:
+	return SimusNetCache.instance._identities_by_unique_id
+
+static func server_serialize_instance(_owner: Object) -> Variant:
+	if SimusNetConnection.is_server():
+		var identity: SimusNetIdentity = SimusNetIdentity.register(_owner)
+		return identity.get_unique_id()
+	return null
+
+static func client_deserialize_instance(data: Variant, _owner: Object) -> SimusNetIdentity:
+	var identity := SimusNetIdentity.new()
+	identity._unique_id = data
+	identity.owner = _owner
+	_owner.set_meta("SimusNetIdentity", identity)
+	identity._initialize()
+	return identity
 
 static func deserialize_unique_id(bytes: PackedByteArray) -> SimusNetIdentity:
-	return _list_by_id.get(deserialize_unique_id_into_int(bytes))
+	return get_dictionary_by_unique_id().get(deserialize_unique_id_into_int(bytes))
 
 static func deserialize_unique_id_into_int(bytes: PackedByteArray) -> int:
 	return bytes.decode_u16(0)
 
-static func get_cached_unique_ids() -> Dictionary[int, Variant]:
-	return SimusNetCache.data_get_or_add("i.uid", {} as Dictionary[int, Variant])
-
-static func get_cached_unique_ids_values() -> Dictionary[Variant, int]:
-	return SimusNetCache.data_get_or_add("i.uidv", {} as Dictionary[Variant, int])
-
-static func try_find_in(object: Object) -> SimusNetIdentity:
-	if object.has_meta("SimusNetIdentity"):
-		return object.get_meta("SimusNetIdentity")
+static func try_find_in(object: Variant) -> SimusNetIdentity:
+	if object is Object:
+		if object.has_meta("SimusNetIdentity"):
+			var i: SimusNetIdentity = object.get_meta("SimusNetIdentity")
+			if i.owner:
+				return i 
 	return null

@@ -74,6 +74,7 @@ func get_mod_instance(mod_name: String) -> SD_Mod:
 	return _loaded_mods.get(mod_name, null)
 
 func console_write_info(text) -> void:
+	return
 	SimusDev.console.write( "{MOD LOADER}: %s" % [str(text)])
 
 func _process(delta: float) -> void:

@@ -1,3 +1,4 @@
+@tool
 @static_unload
 extends SD_Object
 class_name SD_Nodes
@@ -15,9 +16,14 @@ static func fast_queue_free(node: Node) -> void:
 
 static func async_clear_all_children(node: Node) -> void:
 	for i in node.get_children():
-		i.queue_free()
-		await i.tree_exited
-	
+		if is_instance_valid(i):
+			i.queue_free()
+			await i.tree_exited
+
+static func set_children_visibility(node: Node, visibility: bool) -> void:
+	for i in node.get_children():
+		if i is CanvasItem or CanvasLayer:
+			i.visible = visibility
 
 static func async_queue_free(node: Node) -> void:
 	if !is_instance_valid(node):
@@ -30,7 +36,21 @@ static func async_queue_free(node: Node) -> void:
 	node.queue_free()
 	await node.tree_exited
 
+static func is_node_queued_to_free(node: Node) -> bool:
+	if node == SimusDev.get_tree().root:
+		return false
+	
+	var queued: bool = node.is_queued_for_deletion()
+	if queued:
+		return true
+	
+	return is_node_queued_to_free(node.get_parent())
+
 static func async_for_ready(node: Node) -> void:
 	if !node.is_node_ready():
 		await node.ready
-	
+
+static func call_method_if_exists(object: Object, method: StringName, args: Array = []) -> Variant:
+	if object.has_method(method):
+		return object.callv(method, args)
+	return null

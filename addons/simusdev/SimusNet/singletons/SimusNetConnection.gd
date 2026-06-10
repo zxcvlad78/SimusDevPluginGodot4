@@ -5,7 +5,25 @@ const SERVER_ID: int = 1
 
 static var _active: bool = false
 
+static var _is_dedicated_server: bool = false
+
+static var _instance: SimusNetConnection
+
+var _is_was_server: bool = true
+
+var _connecting_check: bool = false
+
+var _is_connected: bool = false
+var _is_connection_canceled: bool = false
+
+signal on_kicked(reason: String)
+
+static func get_instance() -> SimusNetConnection:
+	return _instance
+
 func initialize() -> void:
+	_instance = self
+	
 	singleton.api.connection_failed.connect(_on_connection_failed)
 	singleton.api.connected_to_server.connect(_on_connected_to_server)
 	singleton.api.server_disconnected.connect(_on_server_disconnected)
@@ -27,17 +45,28 @@ func _process(delta: float) -> void:
 	if get_peer() is OfflineMultiplayerPeer:
 		return
 	
+	if _connecting_check == false:
+		if get_peer().get_connection_status() == MultiplayerPeer.ConnectionStatus.CONNECTION_CONNECTING:
+			_connecting_check = true
+			SimusNetEvents.event_connecting.publish()
+		
 	if get_peer().get_connection_status() == MultiplayerPeer.ConnectionStatus.CONNECTION_CONNECTED:
 		if !_active:
 			_set_active(true, is_server())
 			process_mode = Node.PROCESS_MODE_DISABLED
 			
+			_is_was_server = true
+			
 			if is_server():
+				_is_connected = true
+				SimusNetEvents.event_connected_pre.publish()
 				SimusNetEvents.event_connected.publish()
-	
-	
+				
+			
+
 
 func _on_connected_to_server() -> void:
+	_is_was_server = false
 	_set_active(true, false)
 	SimusNetHandShake._api_connected_to_server()
 
@@ -59,19 +88,30 @@ func _set_active(value: bool, server: bool) -> void:
 	
 	if not _active:
 		SimusNetCache.clear()
+		_connecting_check = false
+		_is_connected = false
+		_is_connection_canceled = false
 
 static func is_active() -> bool:
-	return _active
+	if is_instance_valid(_instance):
+		return _active and _instance._is_connected
+	return false
 
 static func is_server() -> bool:
 	if get_peer() and is_active():
 		return singleton.api.is_server()
 	return true
 
+static func is_was_server() -> bool:
+	return _instance._is_was_server
+
 static func is_dedicated_server() -> bool:
 	if is_server():
-		return true
+		return _is_dedicated_server
 	return false
+
+static func set_dedicated_server(value: bool) -> void:
+	_is_dedicated_server = value
 
 static func is_client() -> bool:
 	return !is_dedicated_server()
@@ -88,15 +128,61 @@ static func try_close_peer() -> SimusNetConnection:
 		get_peer().close()
 	return singleton.connection
 
+static func cancel_connection() -> SimusNetConnection:
+	if is_active():
+		_instance._is_connection_canceled = true
+		try_close_peer()
+	return singleton.connection
+
 static func get_connected_peers() -> PackedInt32Array:
 	return singleton.api.get_peers()
 
 static func get_connected_peers_include_self() -> PackedInt32Array:
 	var peers: PackedInt32Array = get_connected_peers()
-	peers.append(get_unique_id())
+	if !is_dedicated_server():
+		peers.append(get_unique_id())
 	return peers
 
 static func get_unique_id() -> int:
 	if is_active():
 		return singleton.api.get_unique_id()
 	return SERVER_ID
+
+static func connect_network_node_callables(object: Object, on_ready: Callable, on_disconnect: Callable, on_not_connected: Callable) -> void:
+	if !is_active():
+		on_not_connected.call()
+		await SimusNetEvents.event_connected.published
+	
+	SimusNetEvents.event_connected.listen(on_ready)
+	
+	if !is_instance_valid(object):
+		return
+	
+	if object is Node:
+		if !object.is_node_ready():
+			await object.ready
+	
+	on_ready.call()
+	
+	SimusNetEvents.event_disconnected.listen(on_disconnect)
+
+static func kick_peer(peer: int, reason: String = "") -> void:
+	if is_server():
+		_instance._kick_yourself.rpc_id(peer, reason)
+		await _instance.get_tree().create_timer(1.0).timeout
+		if get_peer():
+			get_peer().disconnect_peer(peer)
+
+@rpc("authority", "call_remote", "reliable", SimusNetChannels.BUILTIN.HANDSHAKE)
+func _kick_yourself(reason: String) -> void:
+	try_close_peer()
+	on_kicked.emit(reason)
+
+#static func get_ping(peer: int = get_unique_id()) -> float:
+	#match get_peer().get_class():
+		#"ENetMultiplayerPeer":
+			##if get_peer()
+			#var packet_peer: ENetPacketPeer = (get_peer() as ENetMultiplayerPeer).get_peer(peer)
+			#if packet_peer:
+				#return packet_peer.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME)
+	#return -1.0

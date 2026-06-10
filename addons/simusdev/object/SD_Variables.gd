@@ -98,7 +98,6 @@ static func get_or_add_object_meta(object: Object, meta: StringName, default: Va
 		return object.get_meta(meta)
 	
 	object.set_meta(meta, default)
-	print(object)
 	return default
 
 static func set_object_meta(object: Object, meta: StringName, value: Variant) -> void:

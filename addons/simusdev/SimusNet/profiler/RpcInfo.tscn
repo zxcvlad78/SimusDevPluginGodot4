@@ -1,0 +1,16 @@
+[gd_scene format=3 uid="uid://ccn1na6bdrnjr"]
+
+[ext_resource type="PackedScene" uid="uid://mimohkd1dw03" path="res://addons/simusdev/SimusNet/profiler/InfoBase.tscn" id="1_amq02"]
+[ext_resource type="Texture2D" uid="uid://c7icm4tablpa3" path="res://addons/simusdev/SimusNet/icons/Callable.svg" id="2_cb0h0"]
+[ext_resource type="Script" uid="uid://gggeonb0edfs" path="res://addons/simusdev/SimusNet/profiler/RpcInfo.gd" id="3_gqsj6"]
+
+[node name="RpcInfo" unique_id=1987537626 instance=ExtResource("1_amq02")]
+offset_right = 490.0
+script = ExtResource("3_gqsj6")
+
+[node name="Key" parent="." index="0" unique_id=745941618]
+text = "RPC"
+
+[node name="Icon" parent="." index="1" unique_id=300308492]
+texture = ExtResource("2_cb0h0")
+stretch_mode = 3

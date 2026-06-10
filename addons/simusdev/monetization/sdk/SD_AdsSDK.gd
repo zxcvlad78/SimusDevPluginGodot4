@@ -44,7 +44,7 @@ func initialize(monetization_trunk: SD_TrunkMonetization) -> void:
 	
 	_on_initialized()
 	
-	console().write_from_object(self, "initialized!", SD_ConsoleCategories.CATEGORY.INFO)
+	#console().write_from_object(self, "initialized!", SD_ConsoleCategories.CATEGORY.INFO)
 
 func _process(delta: float) -> void:
 	_current_interstitial_cooldown = move_toward(_current_interstitial_cooldown, 0.0, delta)
@@ -139,4 +139,7 @@ func _load_reward_placeholder_() -> void:
 	pass
 
 func _load_and_show_reward_placeholder_() -> void:
+	pass
+
+func _selected() -> void:
 	pass
